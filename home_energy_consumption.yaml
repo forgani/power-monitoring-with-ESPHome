@@ -1,0 +1,531 @@
+substitutions:
+  # Device informations
+  device_name: "powermonitor"
+  gas_imp_value: '10' # impulses / m³ 
+
+esphome:
+  name: powermonitor
+
+esp32:
+  board: esp32-s2-saola-1
+  framework:
+    type: arduino
+    
+logger:
+  level: DEBUG
+    
+ota:
+  password: !secret ota_password
+
+wifi:
+  networks:
+    - ssid: !secret iot_wifi_ssid
+      password: !secret iot_wifi_password
+      manual_ip:
+        static_ip: !secret powermonitor
+        gateway: 192.168.178.1
+        subnet: 255.255.255.0
+    
+# Enable Home Assistant API
+   
+globals:
+  - id: total_gas_pulses
+    type: int
+    restore_value: false # if set to false, the value will be 0 at reboot
+    initial_value: '0'   
+        
+sensor:
+  - platform: ntc
+    sensor: ${device_name}_temp_resistance_sensor
+    name: "${device_name} ntc Temperature"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    icon: "mdi:thermometer"
+    calibration:
+      b_constant: 3950
+      reference_temperature: 15.3°C
+      reference_resistance: 35.769kOhm
+  - platform: resistance
+    id: ${device_name}_temp_resistance_sensor
+    sensor: ${device_name}_temp_ntc_reading
+    configuration: DOWNSTREAM
+    resistor: 10kOhm
+    #internal: true   #todo
+    reference_voltage:  3.3V
+ 
+  ##############################
+  ###############   Read Current
+  ##############################
+  - platform: ct_clamp
+    sensor: ${device_name}_ct1_sensor
+    name: "${device_name} ct1 Measured Current"    # This first sensor gets the Amps, note that is set to internal only.
+    id: ${device_name}_ct1_measured_current
+    #internal: true
+    update_interval: 5s    # todo
+    accuracy_decimals: 3 
+    filters:
+      - calibrate_linear:  # I'm pulling approx 28A
+          - 0.012 -> 0
+          #- 0.048 -> 0.34
+          #- 0.75 -> 8.5
+          - 0.883 -> 11.5
+  - platform: ct_clamp
+    sensor: ${device_name}_ct2_sensor
+    name: "${device_name} ct2 Measured Current"                
+    id: ${device_name}_ct2_measured_current
+    #internal: true
+    update_interval: 5s
+    accuracy_decimals: 3
+    filters:
+      - calibrate_linear:  
+          - 0.012 -> 0      
+          #- 0.048 -> 0.34
+          #- 0.75 -> 8.5
+          - 0.883 -> 11.5
+  - platform: ct_clamp
+    sensor: ${device_name}_ct3_sensor
+    name: "${device_name} ct3 Measured Current"                
+    id: ${device_name}_ct3_measured_current
+    #internal: true
+    update_interval: 5s
+    accuracy_decimals: 3
+    filters:
+      - calibrate_linear: 
+          - 0.012 -> 0
+          #- 0.050 -> 0.34
+          #- 0.75 -> 8.5  
+          - 0.887 -> 11.5
+
+  ##############################
+  ###############   Set Current
+  ##############################
+  - platform: template
+    name: "${device_name} L1 Current"  # if the reading is below 0.1A then it reports 0, keeps your 0 at 0
+    id: ${device_name}_11_current
+    lambda: |-
+      if (id(${device_name}_ct1_measured_current).state > 0.03){
+        return (id(${device_name}_ct1_measured_current).state);
+      } else {
+        return 0.0;
+      }
+    device_class: current
+    accuracy_decimals: 2
+    unit_of_measurement: A
+  - platform: template
+    name: "${device_name} L2 Current"  
+    id: ${device_name}_12_current
+    lambda: |-
+      if (id(${device_name}_ct2_measured_current).state > 0.03){
+        return (id(${device_name}_ct2_measured_current).state);
+      } else {
+        return 0.0;
+      }
+    device_class: current
+    accuracy_decimals: 2
+    unit_of_measurement: A
+  - platform: template
+    name: "${device_name} L3 Current"  
+    id: ${device_name}_13_current
+    lambda: |-
+      if (id(${device_name}_ct3_measured_current).state > 0.03){
+        return (id(${device_name}_ct3_measured_current).state);
+      } else {
+        return 0.0;
+      }
+    device_class: current
+    accuracy_decimals: 2
+    unit_of_measurement: A
+
+  ##############################
+  ###############   Watts
+  ##############################
+  - platform: template
+    name: "${device_name} L1 Watts"  # This sensor converts the Amps to Watts 
+    id: ${device_name}_ct1_watts
+    lambda: |-
+      return id(${device_name}_11_current).state * 230;
+    accuracy_decimals: 2
+    device_class: power
+    unit_of_measurement: W
+  - platform: template
+    name: "${device_name} L2 Watts"  # This sensor converts the Amps to Watts 
+    id: ${device_name}_ct2_watts
+    lambda: |-
+      return id(${device_name}_12_current).state * 230;
+    accuracy_decimals: 2
+    device_class: power
+    unit_of_measurement: W
+  - platform: template
+    name: "${device_name} L3 Watts"  # This sensor converts the Amps to Watts 
+    id: ${device_name}_ct3_watts
+    lambda: |-
+      return id(${device_name}_13_current).state * 230;
+    accuracy_decimals: 2
+    device_class: power
+    unit_of_measurement: W
+    
+  ############################## 
+  ###############   daily_energy  
+  ##############################  
+  - platform: total_daily_energy        # This sensor will give you a Daily kW reading
+    name: "${device_name} L1 daily energy total"
+    unit_of_measurement: 'kWh'   # Ah  kWh
+    accuracy_decimals: 2
+    power_id: ${device_name}_ct1_watts    #todo
+    filters:
+      - multiply: 0.001
+    device_class: energy
+    state_class: total_increasing
+  - platform: total_daily_energy
+    name: "${device_name} L2 daily energy total"
+    unit_of_measurement: 'kWh'   # Ah  kWh
+    accuracy_decimals: 2
+    power_id: ${device_name}_ct2_watts    #todo
+    filters:
+      - multiply: 0.001
+    device_class: energy
+    state_class: total_increasing
+  - platform: total_daily_energy
+    name: "${device_name} L3 daily energy total"
+    unit_of_measurement: 'kWh'   # Ah  kWh
+    accuracy_decimals: 2
+    power_id: ${device_name}_ct3_watts    #todo
+    filters:
+      - multiply: 0.001
+    device_class: energy
+    state_class: total_increasing
+  
+  - platform: adc
+    pin: 3      # ADC1_CH2
+    id: ${device_name}_ct1_sensor
+    attenuation: auto   #  11db
+    accuracy_decimals: 5
+  - platform: adc
+    pin: 5      # ADC1_CH4
+    id: ${device_name}_ct2_sensor
+    attenuation: auto
+    accuracy_decimals: 5
+  - platform: adc
+    pin: 7      # ADC1_CH6
+    id: ${device_name}_ct3_sensor  
+    attenuation: auto
+    accuracy_decimals: 5
+    
+  - platform: adc
+    id: ${device_name}_temp_ntc_reading
+    pin: 6     # ADC1_CH5
+    update_interval: 5s
+    attenuation: auto
+
+  ##############################
+  ################  Gas used
+  ##############################
+  # this sensor is counting the pulses, if your gas meter says 1 imp = 0,01m3 then the 0.001 below is right
+  - platform: template
+    name: "${device_name} Total Gas Pulses"
+    device_class: gas
+    state_class: "total_increasing"
+    lambda: |-
+      return id(total_gas_pulses);
+      
+  # this sensor is using the same logic, just calculating in kWh
+  - platform: template
+    name: "${device_name} Gasverbrauch-kWh"
+    device_class: gas
+    unit_of_measurement: "kWh"
+    state_class: "total_increasing"
+    update_interval: 60s
+    icon: "mdi:fire"
+    accuracy_decimals: 2
+    lambda: |-
+      return id(total_gas_pulses) * 0.1;
+      
+  - platform: template
+    name: "${device_name} Gas used m³"
+    device_class: gas
+    unit_of_measurement: "m³"
+    state_class: "total_increasing"
+    icon: mdi:meter-gas-outline
+    accuracy_decimals: 2
+    update_interval: 60s
+    lambda: |-
+      return id(total_gas_pulses) * 0.01;
+      
+  ##############################
+  ################  Uptime sensor.
+  ##############################
+  - platform: uptime
+    name: ${device_name} Uptime
+    id: "${device_name}_uptime"
+
+  # WiFi Signal sensor.
+  - platform: wifi_signal
+    name: ${device_name} WiFi Signal
+    id: "${device_name}_wifi_signal"
+    update_interval: 15s
+    
+binary_sensor:
+  - platform: status
+    name: "${device_name} Status" 
+  ############
+  - platform: gpio
+    id: internal_pulse_counter
+    name: "${device_name} Live-Impuls"
+    pin:
+      number: GPIO12             
+      mode: INPUT_PULLUP
+    filters:
+      - delayed_on: 10s
+    on_press:
+      then:
+        - lambda: id(total_gas_pulses) += 1;
+        - output.turn_off: ${device_name}_led  
+    on_release:
+      then:
+        - output.turn_on: ${device_name}_led
+        
+  ##############################
+  ################  rf_receiver
+  ##############################
+  #*************************************************
+  #       DOORS
+  #************************************************* 
+  - platform: remote_receiver                  
+    name: "rf_security door 1 open"
+    id: rf_security_door_1_open
+    rc_switch_raw:
+      code: '111111110000010000000011'
+      protocol: 1
+    filters:
+      - delayed_off: 500ms
+
+  - platform: remote_receiver                   # Door1
+    name: "rf_security door 1 close"
+    id: rf_security_door_1_close
+    rc_switch_raw:
+      code: '111111110000010000001111'
+      protocol: 1
+    filters:
+      - delayed_off: 100ms  
+  - platform: template
+    name: rf_security 1
+    device_class: door
+    lambda: |-
+      if (id(rf_security_door_1_open).state) {
+        // door window is open
+        return true;
+      } else if (id(rf_security_door_1_close).state) {
+        // door window closed
+        return false;
+      } else {
+        return {};
+      }
+
+  - platform: remote_receiver                   # Door2
+    name: "rf_security door 2 open"
+    id: rf_security_door_2_open
+    rc_switch_raw:
+      code: '110010000000000100000011'  
+      protocol: 1
+    filters:
+      - delayed_off: 100ms
+  - platform: remote_receiver                   
+    name: "rf_security door 2 close"
+    id: rf_security_door_2_close
+    rc_switch_raw:
+      code: '110010000000000100001111'  
+      protocol: 1
+    filters:
+      - delayed_off: 100ms  
+  - platform: template
+    name: rf_security 2
+    device_class: window
+    lambda: |-
+      if (id(rf_security_door_2_open).state) {
+        // door window is open
+        return true;
+      } else if (id(rf_security_door_2_close).state) {
+        // door window closed
+        return false;
+      } else {
+        return {};
+      }
+      
+  #***************************************************
+  #        MOTION
+  #*************************************************** 
+  - platform: remote_receiver               # motion
+    name: "rf_security motion 1 on"
+    id: rf_security_motion_1_on
+    device_class: motion
+    rc_switch_raw:
+      code: '000110110110101110001100'      
+      protocol: 1
+    filters:
+       - delayed_off: 5s
+    on_press:
+      then:
+        - script.execute: alarm_detection
+        
+  - platform: remote_receiver               # motion
+    name: "rf_security motion 1 off"
+    id: rf_security_motion_1_off
+    device_class: motion
+    rc_switch_raw:
+      code: '000110110110101110000000'      
+      protocol: 1
+    filters:
+       - delayed_off: 5s
+    on_press:
+      then:
+        - script.execute: alarm_detection
+
+  - platform: remote_receiver               # smoke
+    name: "rf_security Smoke_Detector 1"
+    id: rf_security_smoke_1
+    device_class: smoke
+    rc_switch_raw:
+      code: '101010101110110110111001'   
+      protocol: 1
+    filters:
+      - delayed_off: 5s
+    on_press:
+      then:
+        - script.execute: alarm_detection
+        
+  - platform: remote_receiver               # smoke
+    name: "rf_security leak_Detector 1"
+    id: rf_security_leak_Detector_1
+    device_class: moisture
+    rc_switch_raw:
+      code: '010111000010000110011001'   
+      protocol: 1
+    filters:
+      - delayed_off: 5s
+    on_press:
+      then:
+        - script.execute: alarm_detection     
+   
+        
+switch:
+  - platform: shutdown
+    name: "${device_name} Shutdown"
+    id: ${device_name}_shutdown      
+  #***************************************************
+  #        RF-Receiver
+  #***************************************************
+  - platform: template
+    name: "rf_security Alarm state"
+    id : rf_security_alarm_state
+    icon : "mdi:home-lock"
+    optimistic: True
+    restore_state: True
+    turn_on_action:
+      #- output.turn_on: led2_red   # led2_red
+      - switch.turn_on: rf_security_wired_siren
+      - delay: 1s
+      #- switch.turn_on: arm_siren_ext
+    turn_off_action:
+      #- output.turn_off: led2_red
+      - switch.turn_off: rf_security_wired_siren
+      - delay: 1s
+      #- switch.turn_on: disarm_siren_ext
+
+  - platform: template
+    name: "rf_security Wired siren"
+    id : rf_security_wired_siren
+    icon : "mdi:volume-plus"
+    optimistic: True
+    turn_on_action:
+      - output.turn_on: rf_security_wired_siren_gpio
+      - delay: 1min            #Siren max duration
+      - output.turn_off: rf_security_wired_siren_gpio
+    turn_off_action:
+      - output.turn_off: rf_security_wired_siren_gpio
+      
+  - platform: template
+    name: "rf_security Short wired siren"
+    id : rf_security_short_wired_siren
+    optimistic: True
+    turn_on_action:
+      - output.turn_on: rf_security_wired_siren_gpio
+      - delay: 100ms
+      - output.turn_off: rf_security_wired_siren_gpio
+      - delay: 100ms
+      - output.turn_on: rf_security_wired_siren_gpio
+      - delay: 100ms
+      - output.turn_off: rf_security_wired_siren_gpio
+      - delay: 100ms
+      - output.turn_on: rf_security_wired_siren_gpio
+      - delay: 100ms
+      - output.turn_off: rf_security_wired_siren_gpio
+    turn_off_action:
+      - output.turn_off: rf_security_wired_siren_gpio 
+         
+status_led:
+  pin:
+    number: GPIO15           
+    inverted: false   
+ 
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Europe/London
+    
+text_sensor:
+  - platform: template
+    name: "System Time (SNTP)"
+    lambda: |-
+      auto time_str = id(sntp_time).now().strftime("%H:%M:%S - %d-%m-%Y");
+      return { time_str };
+      
+  - platform: template
+    name: "Latest Code"
+    id: rf_code
+      
+# Optional: flashing LED by receiving the signal from the gas meterr
+output:
+  - platform: gpio
+    pin: GPIO11       
+    #inverted: true   
+    id: ${device_name}_led
+    
+  - platform: gpio
+    pin: GPIO17       # TODO
+    id: rf_security_wired_siren_gpio
+
+# rf_security_short_wired_siren
+script:
+  - id: alarm_detection
+    then:
+      if:
+        condition:
+          switch.is_off: rf_security_wired_siren    
+        then:
+          - output.turn_on: ${device_name}_led
+          - delay: 5s
+          - output.turn_off: ${device_name}_led
+          
+##############################
+################  rf - sensor.
+##############################
+remote_receiver:
+  pin: 
+    number: GPIO18      
+    mode: INPUT_PULLUP 
+    inverted: True
+  dump: rc_switch
+  tolerance: 50%
+  filter: 250us
+  idle: 10ms
+  buffer_size: 2kb
+  
+  on_rc_switch:
+    then: 
+      text_sensor.template.publish:
+        id: rf_code
+        state: !lambda |- 
+          char bin_buffer[33];
+          itoa(x.code, bin_buffer, 2);
+          return bin_buffer;
+ 
