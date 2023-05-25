@@ -12,7 +12,7 @@ esp32:
     type: arduino
     
 logger:
-  level: DEBUG
+  level: debug
     
 ota:
   password: !secret ota_password
@@ -27,13 +27,19 @@ wifi:
         subnet: 255.255.255.0
     
 # Enable Home Assistant API
-   
+api:
+  encryption:
+    key: "something"
+
 globals:
   - id: total_gas_pulses
     type: int
     restore_value: false # if set to false, the value will be 0 at reboot
     initial_value: '0'   
-        
+  - id: buzzer_active
+    type: bool
+    initial_value: 'false'  
+    
 sensor:
   - platform: ntc
     sensor: ${device_name}_temp_resistance_sensor
@@ -254,10 +260,9 @@ sensor:
   ##############################
   ################  Uptime sensor.
   ##############################
-  - platform: uptime
+  - platform: uptime   # not used
     name: ${device_name} Uptime
     id: "${device_name}_uptime"
-
   # WiFi Signal sensor.
   - platform: wifi_signal
     name: ${device_name} WiFi Signal
@@ -287,181 +292,76 @@ binary_sensor:
   ##############################
   ################  rf_receiver
   ##############################
+  - platform: template
+    device_class: safety
+    name: 'Water leak'
+    id: 'water_leak_alert'
+    #lambda: |-
+    #  if(id(rf_security_leak_detector_1).state || id(rf_security_leak_detector_2).state) {
+    #    return true;
+    #  } else {
+    #    return false;
+    #  }
+    
   #*************************************************
   #       DOORS
   #************************************************* 
-  - platform: remote_receiver                  
-    name: "rf_security door 1 open"
-    id: rf_security_door_1_open
-    rc_switch_raw:
-      code: '111111110000010000000011'
-      protocol: 1
-    filters:
-      - delayed_off: 500ms
-
-  - platform: remote_receiver                   # Door1
-    name: "rf_security door 1 close"
-    id: rf_security_door_1_close
-    rc_switch_raw:
-      code: '111111110000010000001111'
-      protocol: 1
-    filters:
-      - delayed_off: 100ms  
   - platform: template
-    name: rf_security 1
+    name: "Front Door"
     device_class: door
-    lambda: |-
-      if (id(rf_security_door_1_open).state) {
-        // door window is open
-        return true;
-      } else if (id(rf_security_door_1_close).state) {
-        // door window closed
-        return false;
-      } else {
-        return {};
-      }
-
-  - platform: remote_receiver                   # Door2
-    name: "rf_security door 2 open"
-    id: rf_security_door_2_open
-    rc_switch_raw:
-      code: '110010000000000100000011'  
-      protocol: 1
-    filters:
-      - delayed_off: 100ms
-  - platform: remote_receiver                   
-    name: "rf_security door 2 close"
-    id: rf_security_door_2_close
-    rc_switch_raw:
-      code: '110010000000000100001111'  
-      protocol: 1
-    filters:
-      - delayed_off: 100ms  
+    id: rf_security_front_door
   - platform: template
-    name: rf_security 2
-    device_class: window
-    lambda: |-
-      if (id(rf_security_door_2_open).state) {
-        // door window is open
-        return true;
-      } else if (id(rf_security_door_2_close).state) {
-        // door window closed
-        return false;
-      } else {
-        return {};
-      }
-      
+    name: "Back Door"
+    device_class: door
+    id: rf_security_back_door
+    
   #***************************************************
   #        MOTION
-  #*************************************************** 
-  - platform: remote_receiver               # motion
-    name: "rf_security motion 1 on"
-    id: rf_security_motion_1_on
+  #***************************************************
+  - platform: template
+    name: "Motion"
     device_class: motion
-    rc_switch_raw:
-      code: '000110110110101110001100'      
-      protocol: 1
-    filters:
-       - delayed_off: 5s
-    on_press:
-      then:
-        - script.execute: alarm_detection
-        
-  - platform: remote_receiver               # motion
-    name: "rf_security motion 1 off"
-    id: rf_security_motion_1_off
-    device_class: motion
-    rc_switch_raw:
-      code: '000110110110101110000000'      
-      protocol: 1
-    filters:
-       - delayed_off: 5s
-    on_press:
-      then:
-        - script.execute: alarm_detection
+    id: rf_security_motion
 
   - platform: remote_receiver               # smoke
-    name: "rf_security Smoke_Detector 1"
-    id: rf_security_smoke_1
+    name: "rf_security Smoke_Detector"
+    id: rf_security_smoke
     device_class: smoke
     rc_switch_raw:
       code: '101010101110110110111001'   
       protocol: 1
     filters:
-      - delayed_off: 5s
+      - delayed_off: 100ms
     on_press:
       then:
         - script.execute: alarm_detection
-        
-  - platform: remote_receiver               # smoke
-    name: "rf_security leak_Detector 1"
-    id: rf_security_leak_Detector_1
-    device_class: moisture
-    rc_switch_raw:
-      code: '010111000010000110011001'   
-      protocol: 1
-    filters:
-      - delayed_off: 5s
-    on_press:
-      then:
-        - script.execute: alarm_detection     
-   
-        
+
+
 switch:
   - platform: shutdown
     name: "${device_name} Shutdown"
-    id: ${device_name}_shutdown      
+    id: ${device_name}_shutdown     
+    
   #***************************************************
-  #        RF-Receiver
+  #        Siren
   #***************************************************
-  - platform: template
-    name: "rf_security Alarm state"
-    id : rf_security_alarm_state
-    icon : "mdi:home-lock"
-    optimistic: True
-    restore_state: True
-    turn_on_action:
-      #- output.turn_on: led2_red   # led2_red
-      - switch.turn_on: rf_security_wired_siren
-      - delay: 1s
-      #- switch.turn_on: arm_siren_ext
-    turn_off_action:
-      #- output.turn_off: led2_red
-      - switch.turn_off: rf_security_wired_siren
-      - delay: 1s
-      #- switch.turn_on: disarm_siren_ext
 
   - platform: template
-    name: "rf_security Wired siren"
-    id : rf_security_wired_siren
+    name: "rf_security wired siren active"
+    id : rf_security_wired_siren_active  
     icon : "mdi:volume-plus"
     optimistic: True
-    turn_on_action:
-      - output.turn_on: rf_security_wired_siren_gpio
-      - delay: 1min            #Siren max duration
-      - output.turn_off: rf_security_wired_siren_gpio
-    turn_off_action:
-      - output.turn_off: rf_security_wired_siren_gpio
       
   - platform: template
-    name: "rf_security Short wired siren"
-    id : rf_security_short_wired_siren
-    optimistic: True
+    name: "reset wired siren"
+    id: rf_security_reset_wired_siren_btn
     turn_on_action:
-      - output.turn_on: rf_security_wired_siren_gpio
-      - delay: 100ms
-      - output.turn_off: rf_security_wired_siren_gpio
-      - delay: 100ms
-      - output.turn_on: rf_security_wired_siren_gpio
-      - delay: 100ms
-      - output.turn_off: rf_security_wired_siren_gpio
-      - delay: 100ms
-      - output.turn_on: rf_security_wired_siren_gpio
-      - delay: 100ms
-      - output.turn_off: rf_security_wired_siren_gpio
-    turn_off_action:
-      - output.turn_off: rf_security_wired_siren_gpio 
-         
+      - lambda: |-
+          id(water_leak_alert).publish_state(false);
+      - globals.set:
+          id: buzzer_active
+          value: 'false'
+          
 status_led:
   pin:
     number: GPIO15           
@@ -475,9 +375,15 @@ time:
 text_sensor:
   - platform: template
     name: "System Time (SNTP)"
+    #lambda: |-
+    #  auto time_str = id(sntp_time).now().strftime("%H:%M:%S - %d-%m-%Y");
+    #  return { time_str };
     lambda: |-
-      auto time_str = id(sntp_time).now().strftime("%H:%M:%S - %d-%m-%Y");
-      return { time_str };
+      char str[25];
+      time_t currTime = id(sntp_time).now().timestamp;
+      //strftime(str, sizeof(str), "%Y-%m-%d %H:%M:%S", localtime(&currTime));
+      strftime(str, sizeof(str), "%Y-%m-%dT %H:%M:%S.000Z", gmtime(&currTime));
+      return (std::string) str;
       
   - platform: template
     name: "Latest Code"
@@ -492,20 +398,22 @@ output:
     
   - platform: gpio
     pin: GPIO17       # TODO
-    id: rf_security_wired_siren_gpio
+    id: rf_security_passive_buzzer
 
-# rf_security_short_wired_siren
 script:
   - id: alarm_detection
+    mode: single
     then:
-      if:
+      while:
         condition:
-          switch.is_off: rf_security_wired_siren    
+          - lambda: |-
+              return id(buzzer_active || water_leak_alert);
         then:
-          - output.turn_on: ${device_name}_led
-          - delay: 5s
-          - output.turn_off: ${device_name}_led
-          
+          - output.turn_on: rf_security_passive_buzzer
+          - delay: 100ms 
+          - output.turn_off: rf_security_passive_buzzer
+          - delay: 100ms
+       
 ##############################
 ################  rf - sensor.
 ##############################
@@ -513,19 +421,48 @@ remote_receiver:
   pin: 
     number: GPIO18      
     mode: INPUT_PULLUP 
-    inverted: True
+    inverted: true
   dump: rc_switch
   tolerance: 50%
-  filter: 250us
-  idle: 10ms
-  buffer_size: 2kb
+  filter: 50us
+  idle: 4ms
+  buffer_size: 4kb
   
   on_rc_switch:
     then: 
-      text_sensor.template.publish:
-        id: rf_code
-        state: !lambda |- 
-          char bin_buffer[33];
-          itoa(x.code, bin_buffer, 2);
-          return bin_buffer;
- 
+      lambda: |-
+        if (x.code == 6037913){
+          id(water_leak_alert).publish_state(true);
+          id(buzzer_active)= true;
+          id(alarm_detection).execute();
+        }
+        if (x.code == 16712707){
+          id(rf_security_front_door).publish_state(true);
+          id(buzzer_active)= true;
+          id(alarm_detection).execute();
+        }
+        if (x.code == 16712719){
+          id(rf_security_front_door).publish_state(false);
+          id(buzzer_active)= false;
+        }
+        if (x.code == 13107459){
+          id(rf_security_back_door).publish_state(true);
+          id(buzzer_active)= true;
+          id(alarm_detection).execute();
+        }
+        if (x.code == 13107471){
+          id(rf_security_back_door).publish_state(false);
+          id(buzzer_active)= false;
+        }
+        if (x.code == 1797004){
+          id(rf_security_motion).publish_state(true);
+          id(buzzer_active)= true;
+          id(alarm_detection).execute();
+        }
+        if (x.code == 1796992){
+          id(rf_security_motion).publish_state(false);
+          id(buzzer_active)= false;
+        }
+      # text_sensor.template.publish:
+        # id: rf_code
+        # state: !lambda 'char buffer [10];return itoa(x.code,buffer,16);'
